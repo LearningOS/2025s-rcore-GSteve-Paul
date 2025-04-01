@@ -179,3 +179,31 @@ pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&
     }
     v
 }
+
+/// check the v-ptr access ability
+pub fn check_ptr(token: usize, ptr: *const u8, len: usize, flags: PTEFlags) -> bool {
+    let page_table = PageTable::from_token(token);
+    let mut start = ptr as usize;
+    let end = start + len;
+    while start < end {
+        let start_va = VirtAddr::from(start);
+        let mut vpn = start_va.floor();
+        let ppn_op = page_table.translate(vpn);
+        if let Some(ppn) = ppn_op {
+            if (ppn.flags() | flags) > ppn.flags() {
+                return false;
+            }
+        } else {
+            return false;
+        }
+        vpn.step();
+        let mut end_va: VirtAddr = vpn.into();
+        end_va = end_va.min(VirtAddr::from(end));
+        let old_start = start;
+        start = end_va.into();
+        if start < old_start {
+            return false;
+        }
+    }
+    true
+}

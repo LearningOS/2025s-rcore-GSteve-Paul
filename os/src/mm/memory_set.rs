@@ -63,6 +63,17 @@ impl MemorySet {
             None,
         );
     }
+
+    /// opposite to insertion
+    pub fn erase_framed_area(&mut self, start_va: VirtAddr, end_va: VirtAddr) {
+        self.pop(MapArea::new(
+            start_va,
+            end_va,
+            MapType::Framed,
+            MapPermission::empty(),
+        ));
+    }
+
     fn push(&mut self, mut map_area: MapArea, data: Option<&[u8]>) {
         map_area.map(&mut self.page_table);
         if let Some(data) = data {
@@ -70,6 +81,11 @@ impl MemorySet {
         }
         self.areas.push(map_area);
     }
+
+    fn pop(&mut self, mut map_area: MapArea) {
+        map_area.unmap(&mut self.page_table);
+    }
+
     /// Mention that trampoline is not collected by areas.
     fn map_trampoline(&mut self) {
         self.page_table.map(

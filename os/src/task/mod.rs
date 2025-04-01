@@ -15,6 +15,7 @@ mod switch;
 mod task;
 
 use crate::loader::{get_app_data, get_num_app};
+use crate::mm::{MapPermission, VirtAddr};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
 use alloc::vec::Vec;
@@ -87,6 +88,18 @@ impl TaskManager {
             __switch(&mut _unused as *mut _, next_task_cx_ptr);
         }
         panic!("unreachable in run_first_task!");
+    }
+
+    fn count_syscall(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].syscall_cnt[syscall_id] += 1;
+    }
+
+    fn get_syscall_cnt(&self, syscall_id: usize) -> usize {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].syscall_cnt[syscall_id]
     }
 
     /// Change the status of current `Running` task into `Ready`.
@@ -201,4 +214,32 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+
+/// maintain the syscall cnt
+pub fn count_syscall_for_current_task(syscall_id: usize) {
+    TASK_MANAGER.count_syscall(syscall_id);
+}
+
+/// output the syscall cnt
+pub fn get_syscall_cnt_for_current_task(syscall_id: usize) -> usize {
+    TASK_MANAGER.get_syscall_cnt(syscall_id)
+}
+
+/// do sys_mmap
+pub fn mmap(start_va: VirtAddr, len: usize, perm: MapPermission) -> isize {
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let current = inner.current_task;
+    let ms = &mut inner.tasks[current].memory_set;
+    ms.insert_framed_area(start_va, VirtAddr::from(len + usize::from(start_va)), perm);
+    0
+}
+
+/// do sys_munmap
+pub fn munmap(start_va: VirtAddr, len: usize) -> isize {
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let current = inner.current_task;
+    let ms = &mut inner.tasks[current].memory_set;
+    ms.erase_framed_area(start_va, VirtAddr::from(len + usize::from(start_va)));
+    0
 }
