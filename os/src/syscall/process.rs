@@ -2,11 +2,20 @@
 use alloc::sync::Arc;
 
 use crate::{
+    config::PAGE_SIZE,
     loader::get_app_data_by_name,
+    mm::{
+        check_ptr, translated_byte_buffer, MapPermission, PTEFlags, PageTable, VirtAddr,
+        VirtPageNum,
+    },
     mm::{translated_byte_buffer, translated_refmut, translated_str},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
         suspend_current_and_run_next,
+    },
+    task::{
+        change_program_brk, current_user_token, exit_current_and_run_next,
+        get_syscall_cnt_for_current_task, mmap, munmap, suspend_current_and_run_next,
     },
     timer::get_time_us,
 };
@@ -112,6 +121,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
 pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
+    trace!("kernel: sys_get_time");
     let us = get_time_us();
     let bufs = translated_byte_buffer(current_user_token(), ts as *mut u8, size_of::<TimeVal>());
     let tv = TimeVal {
@@ -129,22 +139,90 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     0
 }
 
-/// YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+/// TODO: Finish sys_trace to pass testcases
+/// HINT: You might reimplement it with virtual memory management.
+pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
+    trace!("kernel: sys_trace");
+    match trace_request {
+        0 => {
+            let token = current_user_token();
+            let ptr = id as *const u8;
+            if check_ptr(token, ptr, 1, PTEFlags::R | PTEFlags::V) {
+                let bufs = translated_byte_buffer(token, ptr, 1);
+                bufs[0][0] as isize
+            } else {
+                -1
+            }
+        }
+        1 => {
+            let token = current_user_token();
+            let ptr = id as *const u8;
+            if check_ptr(token, ptr, 1, PTEFlags::W | PTEFlags::V) {
+                let mut bufs = translated_byte_buffer(token, ptr, 1);
+                bufs[0][0] = data as u8;
+                0
+            } else {
+                -1
+            }
+        }
+        2 => get_syscall_cnt_for_current_task(id) as isize,
+        _ => panic!("unreachable code!"),
+    }
 }
 
-/// YOUR JOB: Implement munmap.
-pub fn sys_munmap(_start: usize, _len: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
+// YOUR JOB: Implement mmap.
+pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
+    trace!("kernel: sys_mmap");
+    if start % PAGE_SIZE != 0 {
+        return -1;
+    }
+    if prot & !0x7 != 0 || prot & 0x7 == 0 {
+        return -1;
+    }
+    let pages = (len + PAGE_SIZE - 1) / PAGE_SIZE;
+    //check not mapped
+    let start_vpn: VirtPageNum = VirtAddr::from(start).into();
+    let token = current_user_token();
+    let page_table = PageTable::from_token(token);
+    for vpn_num in start_vpn.0..start_vpn.0 + pages {
+        let vpn = VirtPageNum(vpn_num);
+        if let Some(pte) = page_table.translate(vpn) {
+            if pte.is_valid() {
+                return -1;
+            }
+        }
+    }
+    mmap(
+        start.into(),
+        pages * PAGE_SIZE,
+        MapPermission::from_bits((prot as u8) << 1).unwrap() | MapPermission::U,
     );
-    -1
+    0
+}
+
+// YOUR JOB: Implement munmap.
+pub fn sys_munmap(start: usize, len: usize) -> isize {
+    trace!("kernel: sys_munmap");
+    if start % PAGE_SIZE != 0 {
+        return -1;
+    }
+    let pages = (len + PAGE_SIZE - 1) / PAGE_SIZE;
+    //check mapped
+    let start_vpn: VirtPageNum = VirtAddr::from(start).into();
+    let token = current_user_token();
+    let page_table = PageTable::from_token(token);
+    for vpn_num in start_vpn.0..start_vpn.0 + pages {
+        let vpn = VirtPageNum(vpn_num);
+        if let Some(pte) = page_table.translate(vpn) {
+            if !pte.is_valid() {
+                return -1;
+            }
+        } else {
+            return -1;
+        }
+    }
+    munmap(start.into(), pages * PAGE_SIZE);
+    0
 }
 
 /// change data segment size
