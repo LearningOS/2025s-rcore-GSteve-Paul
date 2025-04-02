@@ -10,6 +10,7 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefMut;
+use core::cmp::Ordering;
 
 /// Task control block structure
 ///
@@ -71,6 +72,12 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// priority for schedule
+    pub priority: usize,
+
+    /// stride val for schedule
+    pub stride: usize,
 }
 
 impl TaskControlBlockInner {
@@ -93,6 +100,35 @@ impl TaskControlBlockInner {
             self.fd_table.push(None);
             self.fd_table.len() - 1
         }
+    }
+    /// once switch to the task, add pass
+    pub fn add_pass(&mut self) {
+        const BIG_STRIDE: usize = 16 * 15 * 14 * 13 * 11 * 9;
+        self.stride += BIG_STRIDE / self.priority;
+    }
+}
+
+impl PartialEq for TaskControlBlock {
+    fn eq(&self, other: &Self) -> bool {
+        self.getpid() == other.getpid()
+    }
+}
+
+impl Eq for TaskControlBlock {}
+
+impl PartialOrd for TaskControlBlock {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.inner_exclusive_access()
+            .stride
+            .partial_cmp(&other.inner_exclusive_access().stride)
+    }
+}
+
+impl Ord for TaskControlBlock {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.inner_exclusive_access()
+            .stride
+            .cmp(&other.inner_exclusive_access().stride)
     }
 }
 
@@ -135,6 +171,8 @@ impl TaskControlBlock {
                     ],
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    priority: 16,
+                    stride: 0,
                 })
             },
         };
@@ -216,6 +254,8 @@ impl TaskControlBlock {
                     fd_table: new_fd_table,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    priority: 16,
+                    stride: 0,
                 })
             },
         });
@@ -276,6 +316,68 @@ impl TaskControlBlock {
         let ms = &mut inner.memory_set;
         ms.erase_framed_area(start_va, VirtAddr::from(len + usize::from(start_va)));
         0
+    }
+
+    /// create a new task
+    pub fn spawn(self: &Arc<Self>, elf_data: &[u8]) -> Arc<Self> {
+        let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
+
+        let pid_handle = pid_alloc();
+        let kernel_stack = kstack_alloc();
+        let kernel_stack_top = kernel_stack.get_top();
+        let task_cx = TaskContext::goto_trap_return(kernel_stack_top);
+
+        let trap_cx_ppn = memory_set
+            .translate(VirtAddr::from(TRAP_CONTEXT_BASE).into())
+            .unwrap()
+            .ppn();
+        let trap_cx = trap_cx_ppn.get_mut();
+        *trap_cx = TrapContext::app_init_context(
+            entry_point,
+            user_sp,
+            KERNEL_SPACE.exclusive_access().token(),
+            kernel_stack_top,
+            trap_handler as usize,
+        );
+
+        let inner = unsafe {
+            UPSafeCell::new(TaskControlBlockInner {
+                base_size: user_sp,
+                children: Vec::new(),
+                trap_cx_ppn,
+                task_cx,
+                task_status: TaskStatus::Ready,
+                memory_set,
+                parent: Some(Arc::downgrade(self)),
+                exit_code: 0,
+                heap_bottom: user_sp,
+                program_brk: user_sp,
+                priority: 16,
+                stride: 0,
+            })
+        };
+
+        let task_control_block = Arc::new(TaskControlBlock {
+            inner,
+            pid: pid_handle,
+            kernel_stack,
+        });
+
+        let mut parent_inner = self.inner_exclusive_access();
+        parent_inner.children.push(task_control_block.clone());
+
+        task_control_block
+    }
+
+    /// set priority for schedule
+    pub fn set_priority(&self, prio: isize) -> isize {
+        match prio {
+            2.. => {
+                self.inner_exclusive_access().priority = prio as usize;
+                prio
+            }
+            _ => -1,
+        }
     }
 }
 
