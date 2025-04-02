@@ -22,12 +22,7 @@ mod switch;
 mod task;
 
 use crate::loader::get_app_data_by_name;
-use crate::loader::{get_app_data, get_num_app};
-use crate::mm::{MapPermission, VirtAddr};
-use crate::sync::UPSafeCell;
-use crate::trap::TrapContext;
 use alloc::sync::Arc;
-use alloc::vec::Vec;
 use lazy_static::*;
 pub use manager::{fetch_task, TaskManager};
 use switch::__switch;
@@ -119,32 +114,4 @@ lazy_static! {
 ///Add init process to the manager
 pub fn add_initproc() {
     add_task(INITPROC.clone());
-}
-
-/// maintain the syscall cnt
-pub fn count_syscall_for_current_task(syscall_id: usize) {
-    TASK_MANAGER.count_syscall(syscall_id);
-}
-
-/// output the syscall cnt
-pub fn get_syscall_cnt_for_current_task(syscall_id: usize) -> usize {
-    TASK_MANAGER.get_syscall_cnt(syscall_id)
-}
-
-/// do sys_mmap
-pub fn mmap(start_va: VirtAddr, len: usize, perm: MapPermission) -> isize {
-    let mut inner = TASK_MANAGER.inner.exclusive_access();
-    let current = inner.current_task;
-    let ms = &mut inner.tasks[current].memory_set;
-    ms.insert_framed_area(start_va, VirtAddr::from(len + usize::from(start_va)), perm);
-    0
-}
-
-/// do sys_munmap
-pub fn munmap(start_va: VirtAddr, len: usize) -> isize {
-    let mut inner = TASK_MANAGER.inner.exclusive_access();
-    let current = inner.current_task;
-    let ms = &mut inner.tasks[current].memory_set;
-    ms.erase_framed_area(start_va, VirtAddr::from(len + usize::from(start_va)));
-    0
 }
