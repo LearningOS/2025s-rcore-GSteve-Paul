@@ -9,17 +9,12 @@ use crate::{
     fs::{open_file, OpenFlags},
     loader::get_app_data_by_name,
     mm::{
-        check_ptr, translated_byte_buffer, MapPermission, PTEFlags, PageTable, VirtAddr,
-        VirtPageNum,
+        translated_byte_buffer, translated_refmut, translated_str, MapPermission, PageTable,
+        VirtAddr, VirtPageNum,
     },
-    mm::{translated_byte_buffer, translated_refmut, translated_str},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
         suspend_current_and_run_next,
-    },
-    task::{
-        change_program_brk, current_user_token, exit_current_and_run_next,
-        get_syscall_cnt_for_current_task, mmap, munmap, suspend_current_and_run_next,
     },
     timer::get_time_us,
 };
@@ -141,37 +136,6 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     0
 }
 
-/// TODO: Finish sys_trace to pass testcases
-/// HINT: You might reimplement it with virtual memory management.
-pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
-    trace!("kernel: sys_trace");
-    match trace_request {
-        0 => {
-            let token = current_user_token();
-            let ptr = id as *const u8;
-            if check_ptr(token, ptr, 1, PTEFlags::R | PTEFlags::V) {
-                let bufs = translated_byte_buffer(token, ptr, 1);
-                bufs[0][0] as isize
-            } else {
-                -1
-            }
-        }
-        1 => {
-            let token = current_user_token();
-            let ptr = id as *const u8;
-            if check_ptr(token, ptr, 1, PTEFlags::W | PTEFlags::V) {
-                let mut bufs = translated_byte_buffer(token, ptr, 1);
-                bufs[0][0] = data as u8;
-                0
-            } else {
-                -1
-            }
-        }
-        2 => get_syscall_cnt_for_current_task(id) as isize,
-        _ => panic!("unreachable code!"),
-    }
-}
-
 // YOUR JOB: Implement mmap.
 pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
     trace!("kernel: sys_mmap");
@@ -194,7 +158,8 @@ pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
             }
         }
     }
-    mmap(
+    let task = current_task().unwrap();
+    task.mmap(
         start.into(),
         pages * PAGE_SIZE,
         MapPermission::from_bits((prot as u8) << 1).unwrap() | MapPermission::U,
@@ -223,7 +188,8 @@ pub fn sys_munmap(start: usize, len: usize) -> isize {
             return -1;
         }
     }
-    munmap(start.into(), pages * PAGE_SIZE);
+    let task = current_task().unwrap();
+    task.munmap(start.into(), pages * PAGE_SIZE);
     0
 }
 
