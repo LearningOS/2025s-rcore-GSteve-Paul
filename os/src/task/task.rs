@@ -10,7 +10,8 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefMut;
-use core::cmp::Ordering;
+use core::cmp::{Ordering, Reverse};
+use core::u64;
 
 /// Task control block structure
 ///
@@ -38,6 +39,8 @@ impl TaskControlBlock {
         inner.memory_set.token()
     }
 }
+
+pub struct Stride(pub u64);
 
 pub struct TaskControlBlockInner {
     /// The physical page number of the frame where the trap context is placed
@@ -74,10 +77,10 @@ pub struct TaskControlBlockInner {
     pub program_brk: usize,
 
     /// priority for schedule
-    pub priority: usize,
+    pub priority: u64,
 
     /// stride val for schedule
-    pub stride: usize,
+    pub stride: Stride,
 }
 
 impl TaskControlBlockInner {
@@ -103,8 +106,46 @@ impl TaskControlBlockInner {
     }
     /// once switch to the task, add pass
     pub fn add_pass(&mut self) {
-        const BIG_STRIDE: usize = 16 * 15 * 14 * 13 * 11 * 9;
-        self.stride += BIG_STRIDE / self.priority;
+        const BIG_STRIDE: u64 = 16 * 15 * 14 * 13 * 11 * 9;
+        self.stride.0 += BIG_STRIDE / self.priority;
+    }
+}
+
+impl PartialEq for Stride {
+    fn eq(&self, _other: &Self) -> bool {
+        false
+    }
+}
+
+impl Eq for Stride {}
+
+impl PartialOrd for Stride {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        let abs = if self.0 < other.0 {
+            other.0 - self.0
+        } else {
+            self.0 - other.0
+        };
+        if abs < u64::MAX / 2 {
+            self.0.partial_cmp(&other.0)
+        } else {
+            Reverse(self.0).partial_cmp(&Reverse(other.0))
+        }
+    }
+}
+
+impl Ord for Stride {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let abs = if self.0 < other.0 {
+            other.0 - self.0
+        } else {
+            self.0 - other.0
+        };
+        if abs < u64::MAX / 2 {
+            self.0.cmp(&other.0)
+        } else {
+            Reverse(self.0).cmp(&Reverse(other.0))
+        }
     }
 }
 
@@ -172,7 +213,7 @@ impl TaskControlBlock {
                     heap_bottom: user_sp,
                     program_brk: user_sp,
                     priority: 16,
-                    stride: 0,
+                    stride: Stride(0),
                 })
             },
         };
@@ -255,7 +296,7 @@ impl TaskControlBlock {
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
                     priority: 16,
-                    stride: 0,
+                    stride: Stride(0),
                 })
             },
         });
@@ -353,7 +394,7 @@ impl TaskControlBlock {
                 heap_bottom: user_sp,
                 program_brk: user_sp,
                 priority: 16,
-                stride: 0,
+                stride: Stride(0),
             })
         };
 
@@ -373,7 +414,7 @@ impl TaskControlBlock {
     pub fn set_priority(&self, prio: isize) -> isize {
         match prio {
             2.. => {
-                self.inner_exclusive_access().priority = prio as usize;
+                self.inner_exclusive_access().priority = prio as u64;
                 prio
             }
             _ => -1,
