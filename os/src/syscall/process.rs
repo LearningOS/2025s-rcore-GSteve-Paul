@@ -7,7 +7,6 @@ use alloc::sync::Arc;
 use crate::{
     config::PAGE_SIZE,
     fs::{open_file, OpenFlags},
-    loader::get_app_data_by_name,
     mm::{
         translated_byte_buffer, translated_refmut, translated_str, MapPermission, PageTable,
         VirtAddr, VirtPageNum,
@@ -207,9 +206,10 @@ pub fn sys_spawn(path: *const u8) -> isize {
     trace!("kernel:pid[{}] sys_spawn", current_task().unwrap().pid.0);
     let token = current_user_token();
     let str_path = translated_str(token, path);
-    if let Some(data) = get_app_data_by_name(&str_path) {
+    if let Some(app_inode) = open_file(str_path.as_str(), OpenFlags::RDONLY) {
         let task = current_task().unwrap();
-        let new_task = task.spawn(data);
+        let data = app_inode.read_all();
+        let new_task = task.spawn(&data);
         let new_pid = new_task.pid.0;
         add_task(new_task);
         new_pid as isize

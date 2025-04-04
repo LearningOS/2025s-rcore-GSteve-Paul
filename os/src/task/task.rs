@@ -395,6 +395,14 @@ impl TaskControlBlock {
                 program_brk: user_sp,
                 priority: 16,
                 stride: Stride(0),
+                fd_table: vec![
+                    // 0 -> stdin
+                    Some(Arc::new(Stdin)),
+                    // 1 -> stdout
+                    Some(Arc::new(Stdout)),
+                    // 2 -> stderr
+                    Some(Arc::new(Stdout)),
+                ],
             })
         };
 
