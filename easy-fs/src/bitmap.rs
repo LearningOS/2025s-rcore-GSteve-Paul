@@ -63,6 +63,16 @@ impl Bitmap {
                 bitmap_block[bits64_pos] -= 1u64 << inner_pos;
             });
     }
+
+    pub fn is_alloc(&self, block_device: &Arc<dyn BlockDevice>, bit: usize) -> bool {
+        let (block_pos, bits64_pos, inner_pos) = decomposition(bit);
+        get_block_cache(block_pos + self.start_block_id, Arc::clone(block_device))
+            .lock()
+            .read(0, |bitmap_block: &BitmapBlock| {
+                bitmap_block[bits64_pos] & (1u64 << inner_pos) > 0
+            })
+    }
+
     /// Get the max number of allocatable blocks
     pub fn maximum(&self) -> usize {
         self.blocks * BLOCK_BITS

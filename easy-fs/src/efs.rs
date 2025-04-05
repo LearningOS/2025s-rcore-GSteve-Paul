@@ -13,8 +13,10 @@ pub struct EasyFileSystem {
     pub inode_bitmap: Bitmap,
     ///Data bitmap
     pub data_bitmap: Bitmap,
-    inode_area_start_block: u32,
-    data_area_start_block: u32,
+    ///inode start
+    pub inode_area_start_block: u32,
+    ///data start
+    pub data_area_start_block: u32,
 }
 
 type DataBlock = [u8; BLOCK_SZ];
@@ -128,6 +130,12 @@ impl EasyFileSystem {
     /// Allocate a new inode
     pub fn alloc_inode(&mut self) -> u32 {
         self.inode_bitmap.alloc(&self.block_device).unwrap() as u32
+    }
+
+    /// Deallocate a old inode
+    pub fn dealloc_inode(&mut self, inode_id: u32) {
+        self.inode_bitmap
+            .dealloc(&self.block_device, inode_id as usize)
     }
 
     /// Allocate a data block
