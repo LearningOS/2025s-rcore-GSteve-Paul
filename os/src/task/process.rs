@@ -49,9 +49,97 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+    /// mutex_available_vector
+    pub mutex_available_vector: Vec<usize>,
+    /// semaphore_available_vector
+    pub semaphore_available_vector: Vec<usize>,
+    /// mutex_allocation_matrix
+    pub mutex_allocation_matrix: Vec<Vec<usize>>,
+    /// semaphore_allocation_matrix
+    pub semaphore_allocation_matrix: Vec<Vec<usize>>,
+    /// mutex_need_matrix
+    pub mutex_need_matrix: Vec<Vec<usize>>,
+    /// semaphore_need_matrix
+    pub semaphore_need_matrix: Vec<Vec<usize>>,
+    /// deadlock_detect
+    pub deadlock_detect: bool,
 }
 
 impl ProcessControlBlockInner {
+    /// check dead lock for mutex
+    pub fn check_mutex_lock(&self) -> bool {
+        let thread_sz = self.mutex_allocation_matrix.len();
+        let mut work = self.mutex_available_vector.clone();
+        let mut finish = vec![false; thread_sz];
+        for tid in 0..thread_sz {
+            if self.tasks[tid].is_none() {
+                finish[tid] = true;
+            }
+        }
+        loop {
+            let mut target_thr = None;
+            for tid in 0..thread_sz {
+                if finish[tid] {
+                    continue;
+                }
+                if self.mutex_need_matrix[tid]
+                    .iter()
+                    .enumerate()
+                    .all(|(mutex_id, need)| *need <= work[mutex_id])
+                {
+                    target_thr = Some(tid);
+                    break;
+                }
+            }
+            if let Some(tid) = target_thr {
+                self.mutex_allocation_matrix[tid]
+                    .iter()
+                    .enumerate()
+                    .for_each(|(mutex_id, alloc)| work[mutex_id] += alloc);
+                finish[tid] = true;
+            } else {
+                break;
+            }
+        }
+        finish.iter().all(|x| *x)
+    }
+    /// check dead lock for semaphore
+    pub fn check_semaphore_down(&self) -> bool {
+        let thread_sz = self.semaphore_allocation_matrix.len();
+        let mut work = self.semaphore_available_vector.clone();
+        let mut finish = vec![false; thread_sz];
+        for tid in 0..thread_sz {
+            if self.tasks[tid].is_none() {
+                finish[tid] = true;
+            }
+        }
+        loop {
+            let mut target_thr = None;
+            for tid in 0..thread_sz {
+                if finish[tid] {
+                    continue;
+                }
+                if self.semaphore_need_matrix[tid]
+                    .iter()
+                    .enumerate()
+                    .all(|(sem_id, need)| *need <= work[sem_id])
+                {
+                    target_thr = Some(tid);
+                    break;
+                }
+            }
+            if let Some(tid) = target_thr {
+                self.semaphore_allocation_matrix[tid]
+                    .iter()
+                    .enumerate()
+                    .for_each(|(sem_id, alloc)| work[sem_id] += alloc);
+                finish[tid] = true;
+            } else {
+                break;
+            }
+        }
+        finish.iter().all(|x| *x)
+    }
     #[allow(unused)]
     /// get the address of app's page table
     pub fn get_user_token(&self) -> usize {
@@ -119,6 +207,13 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    mutex_allocation_matrix: vec![Vec::new(); 1],
+                    semaphore_allocation_matrix: vec![Vec::new(); 1],
+                    mutex_available_vector: Vec::new(),
+                    semaphore_available_vector: Vec::new(),
+                    mutex_need_matrix: vec![Vec::new(); 1],
+                    semaphore_need_matrix: vec![Vec::new(); 1],
+                    deadlock_detect: false,
                 })
             },
         });
@@ -245,6 +340,13 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    semaphore_allocation_matrix: vec![Vec::new(); 1],
+                    mutex_allocation_matrix: vec![Vec::new(); 1],
+                    mutex_available_vector: Vec::new(),
+                    semaphore_available_vector: Vec::new(),
+                    mutex_need_matrix: vec![Vec::new(); 1],
+                    semaphore_need_matrix: vec![Vec::new(); 1],
+                    deadlock_detect: false,
                 })
             },
         });
